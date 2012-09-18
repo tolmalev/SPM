@@ -1,0 +1,10 @@
+#!/bin/bash
+
+echo s > /dev/spm/scan
+echo s > /dev/spm/nobac0
+
+size=`cat /sys/module/spm_dev/parameters/slot`
+
+od -w$size -t x2 /dev/spm/scan
+
+echo c > /dev/spm/nobac0

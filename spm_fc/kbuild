@@ -1,0 +1,6 @@
+LINUX ?= /usr/src/linux
+
+all:
+	$(MAKE) -C $(LINUX) M=`pwd` modules
+
+obj-m += spm_fc.o

@@ -1,0 +1,298 @@
+#!/usr/bin/wish
+
+#
+#	gamp - Graphical Access to Module Parameters
+#
+#	A graphical interface to module parameters as made
+#	available by the /sys filesystem
+#
+
+#  Copyright (C) 2008-2009 Marcello Carla'
+
+#  This program is free software; you can use, modify and redistribute
+#  it under the terms of the GNU General Public License version 2 as
+#  published by the Free Software Foundation (www.fsf.org).
+
+
+#  Address of the author:
+#  Department of Physics, University of Florence
+#  Via G. Sansone 1
+#  Sesto F.no (Firenze) I 50019 - Italy
+#  e-mail: carla@fi.infn.it
+
+#
+# get first module name; if any more left in 'argv' start a new process
+#
+
+proc main {argc argv argv0} {
+    if {$argc == 0} {set argv "spm_dev spm_fc"} ;# default operation
+    set argv [split [join $argv " "]]
+    set module [lindex $argv 0]
+    set argv [lreplace $argv 0 0]
+    if {[llength $argv] != 0} {exec $argv0 $argv &}
+    module_window $module $argv0
+}
+
+#
+# create the module window with menu etc.
+#
+
+proc module_window {module argv0} {
+    global D value dir colours
+
+    wm title . $module
+    set dir "/sys/module/$module"
+    
+#    label .l -text "$module" -fg red -bg white
+#    pack .l -fill x
+
+    frame .w -relief ridge -bd 3         ;# parameters frame
+    frame .m                             ;# menu  bar
+    pack .m -fill x
+    pack .w -fill both -expand 1
+
+    menubutton .m.action -text actions -menu .m.action.1
+    menu .m.action.1
+    .m.action.1 add command -label refresh -command refresh
+    .m.action.1 add command -label apply -command apply_all
+    .m.action.1 add command -label exit -command exit
+
+    pack .m.action -side left
+
+    menubutton .m.other -text other -menu .m.other.1
+    menu .m.other.1
+    foreach entry \
+	[lsort [glob -directory "/sys/module/" -nocomplain -types d *]] {
+	    if ([file exists $entry/parameters]) {
+		set item [file tail $entry]
+		.m.other.1 add command -label $entry \
+		    -command "exec $argv0 $item &"
+	    }
+	}
+
+    pack .m.other -side left
+
+# build and start the timer
+
+    label .m.timer -font 6x13 -background white
+    pack .m.timer -side right
+    time_loop .m.timer
+}
+
+#
+# re-read all values
+#
+
+proc refresh {} {
+    global D value dir
+    foreach item [array names value] {
+	set value($item) [read_param $dir/parameters/$item]
+        .w.$item.entry configure -bg grey85
+    }
+}
+
+#
+# modify a single value
+#
+
+proc apply_to {item} {
+    global D value dir
+    if {[look_at_permission $dir/parameters/$item] == "normal"} {
+        write_param $dir/parameters/$item $value($item)
+    }
+    .w.$item.entry configure -bg grey85
+}
+
+#
+# modify all values
+#
+
+proc apply_all {} {
+    global D value dir
+    foreach item [array names value] {
+	if {[string equal [.w.$item.entry cget -state] normal]} {
+	    apply_to $item
+	}
+    }
+}
+
+proc modify {item} {
+    .w.$item.entry configure -bg yellow
+}
+
+#
+# read_param {name} :  open-read-close a parameter pseudo file
+#
+
+proc read_param {name} {
+    if {[catch "open $name" chan_id] != 0} {return none}
+    set item [read -nonewline $chan_id]
+    close $chan_id
+    return  $item
+}
+
+#
+# write_param {name} :  open-write-close a parameter pseudo file
+#
+
+proc write_param {name value} {
+    set chan_id [open $name w]
+    puts -nonewline $chan_id $value
+    close $chan_id
+    return
+}
+
+#
+# time_loop - keep the table update
+#
+
+proc time_loop {time_label} {
+    global D value dir parameter
+    set time [clock format [clock seconds] -format "%d-%m-%Y %H:%M:%S"]
+    $time_label configure -text $time
+    after 1000 time_loop $time_label
+
+#    set start [clock clicks]
+
+    get_parameters $dir/parameters
+    update_and_insert
+    cleanup
+
+#    set end [clock clicks]
+#    set at [string range $start 0 end-6].[string range $start end-5 end]
+#    puts "update at $at sec in [expr $end - $start] usec"
+
+}
+
+#
+# update_and_insert - for each item in "parameter" update its entry
+#                     or create a new one if missing
+#
+
+proc update_and_insert {} {
+
+    global dir parameter value sequence
+
+    set before ""
+    set sequence [list]
+
+    foreach item [lsort -decreasing [array names parameter]] {
+
+        set entry $dir/parameters/$item
+        set state [look_at_permission $entry]
+	if {$state == "normal"} {lappend sequence $item}
+
+	if {[array names value $item] == ""} {
+	    frame .w.$item
+	    label .w.$item.name -text $item -anchor w -width 20
+
+	    entry .w.$item.entry -textvariable value($item) \
+		-width 10 -justify center -disabledbackground "#e6dcbc"
+	    .w.$item.entry configure -state $state
+
+            set value($item) $parameter($item)
+
+	    if {$before == ""} {
+		pack .w.$item -expand 1 -fill x
+	    } else {
+		pack .w.$item -expand 1 -fill x -before .w.$before
+	    }
+
+	    pack .w.$item.entry -side left -anchor e
+	    pack .w.$item.name -side left -expand 1 -fill x
+
+	    bind .w.$item.entry <Key-Return> "apply_to $item"
+ 	    bind .w.$item.entry <Key-Tab> "event_none"
+ 	    bind .w.$item.entry <Key-Up> "move_up $item"
+ 	    bind .w.$item.entry <Key-Down> "move_down $item"
+	    bind .w.$item.entry <Key-Left> "event_none"
+	    bind .w.$item.entry <Key-Right> "event_none"
+
+	    bind .w.$item.entry <Key> "modify $item"
+  
+	} else {
+
+            .w.$item.entry configure -state $state
+            if {[string equal [.w.$item.entry cget -bg] yellow] == 0} {
+                set value($item) $parameter($item)
+            }
+        }
+	set before $item
+    }
+}
+
+#
+# move focus up and down the parameters list
+#
+
+proc event_none {} {}
+
+proc move_up {item} {
+    global sequence
+    set here [expr [lsearch -exact $sequence $item] + 1]
+    if {$here == [llength $sequence]} {set here 0}
+    set there [lindex $sequence $here]
+    focus .w.$there.entry
+}
+
+proc move_down {item} {
+    global sequence
+    set here [lsearch -exact $sequence $item]
+    if {$here == 0 || $here == -1} {set here [llength $sequence]}
+    set there [lindex $sequence [expr $here - 1]]
+    focus .w.$there.entry
+}
+
+#
+# cleanup - destroy each entry that does not appear in "parameter"
+#
+
+proc cleanup {} {
+    global parameter value
+        
+    foreach item [array names value] {
+	if {[array names parameter $item] == ""} {
+	    destroy .w.$item
+	    unset value($item)
+        }
+    }
+}
+
+#
+# look at permissions for a given entry and select state
+#
+ 
+proc look_at_permission {entry} {	
+    if {[string first [string index [file attributes $entry -permissions] 2] \
+                "267"] == -1} {
+        return disabled
+    } else {
+        return normal
+    }
+}
+
+#
+# build the global associative array "parameter(<name>)"
+# with actual parameters name and value in /sys
+#
+
+proc get_parameters {dir} {
+
+    global parameter
+    catch "unset parameter"
+    foreach i [glob -directory $dir -nocomplain -types f *] {
+
+        if {[catch "open $i" chan_id] == 0} {
+            set item [read -nonewline $chan_id]
+            close $chan_id
+        } else {
+            set item none
+        }
+
+        set parameter([file tail $i]) $item
+    }
+    return
+}
+
+# tk_focusFollowsMouse
+main $argc $argv $argv0

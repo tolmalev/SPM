@@ -1,0 +1,5 @@
+#!/bin/bash
+
+module=spm_fc
+
+[[ -d /sys/module/$module ]] && /sbin/rmmod $module

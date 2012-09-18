@@ -1,0 +1,133 @@
+2009-12-07  Added 'info' device to read current interrupt routine parameters.
+
+2009-12-02  Modified interrupt overrun threshold in nibac 60 -> 25 usec.
+
+2009-11-27  HOLD_BUFFER in spm_dev.c lets choose buffer allocation policy
+            (1: try to reuse / 0: give away asap). Added irq.byte_size.
+
+2009-11-27  Bugs fixed in nobac_init_exit with hrtime_cancel & nibac/install
+            with is_master flag.
+
+2009-11-26  Rearranged get_devnumber/release_devnumber to reuse minors when
+            unloading/reloading modules.
+
+2009-11-26  Before starting board configuration, niconf takes a lock on scan
+            (or fails) to avoid any concurrent operation on irq parameters.
+
+2009-11-25  Update of README.
+            New macro's for event buffer handling in user space.
+
+2009-11-20  Major rearrangement of several parts of the code.
+	    The 'spm_es' structure, renamed 'spm_global', is now the unique
+	    exported symbols and collects all linkages among the several
+	    spm2 modules.
+	    The event buffer definition has been deeply modified (see
+	    include/spm_dev_data.h) and the 'irq_parameters' structure
+	    definition, moved to include/spm_bac.h , contains several new
+	    fields (sample_adc, sample_dac, adc, dac). 'struct scan_params'
+	    modified accordingly.
+	    Three new parameters added to the spm_dev module: sample_adc,
+	    sample_dac and slot to select the size for adc and dac data area
+	    in the event buffer.
+	    The registration mechanism for master and slave board driver
+	    modified to support variable adc buffer size.
+	    Modified the buffer handling mechanism in interrupt context
+	    and collected all relevant information for the user feedback
+	    code in the single passed argument 'struct irq_parameters * irq'.
+
+2009-11-11  "nobac" can be instructed to generate a stream of accurately
+	    timed events (through hrtimers) with given patterns for
+	    ADC's data.
+
+2009-11-11  Global symbol spm_es renamed as spm_global.
+
+2009-11-07  Added option -f to "genevent": read from a user file values
+	    to be stored into events as ADC's reading.
+
+2009-11-06  A dummy calibration table can be used with boards that do not
+	    have a true one (see "parameters.def")
+
+2009-11-06  Added file "parameters.def" with local defaults for spm modules.
+	    Values in "parameters.def" override built-in defaults in the
+	    "install" procedure (i.e., to reset to native defaults comment
+	    out or delete all declarations in "parameters.def") and are
+	    overriden by command line parameters to "install".
+
+2009-11-04  nobac can be registered as master and/or slave, in all
+	    possible combination with other boards.
+
+2009-09-29  Added in niconf support for "raw data" <--> Volt conversion with
+	    N.I. PCI6221 and conversion functions in calibration.c/h.
+	    Added use of "raw data" <--> Volt conversion to options in 'frame'.
+	    Added test program to read/write ADC/DAC in Volt.
+
+2009-09-16  'nobac' now accepts samples > 1 and (dummy) dma.
+
+2009-07-08  'shift' parameter in feedback/testchans.c to flip DAC 0 between
+            values DAC_0 and DAC_0 ^ shift.
+
+2009-06-10  spm_register_feedback_code()/spm_unregister_feedback_code()
+            prototypes moved into include/spm_bac.h.
+
+2009-06-08  Added cadence=<usec> to install options and check for
+            interrupt cadence sanity.
+
+2009-04-23  Added samples_per_point parameter to perform (under DMA)
+            ADC oversampling. DMA supported only for NI6221 board.
+
+2009-04-21  Modified the 'pay_load' area usage. Now it can be large
+            whatever size.
+            Added the ' ' command to pass parameters once, then arm
+            scan many times with 's'.
+            Moved the dma area management into nibac_open_release.c
+            and added dma, nodma and samples options to the install
+            and configuration procedure.
+
+2009-01-30  Added support for DMA with board N.I. PCI-6221; new
+	    options in niconf to support DMA configuration, old ones
+	    modified.
+	    Added default standard variables to spm_fc modules.
+	    Now latim_pp/install exits with unambiguous statement when
+	    not authorized.
+	    Added feedback module "testchans" to twiddle with ADC and
+	    DAC values (thanks to G. Aloisi - aloisi@unifi.it).
+
+2009-01-15  Corrected samplePeriodDivisor from cadence_usec in niconf.c
+
+2008-11-20  Now frame accepts values 8 ... 15 to -C option to select DAC
+            channels 0 ... 7.
+
+2008-10-24  Moved gnuplot start early in user/latim.c to avoid holding the
+            /dev/latim device after latim exits and plot display persists.
+
+2008-10-23  Added to latim_pp module direct log to tty.
+            latim_pp recognizes when an external counter cannot be correctly
+            read because the parallel port does not accept input mode.
+
+2008-10-14  Replaced .nopage with .fault in vm_operations_struct functions
+            in xxbac_mmap.c to comply with kernels > 2.6.26; breaks with
+            kernels < 2.6.23.
+
+2008-10-10  DOUBLE_LOG macro in spm_bac.h modified to cope with changes in
+            struct tty_struct from kernel 2.6.25 to 2.6.26.
+
+2008-10-10  Install and remove procedure for latim_pp rewritten. Now
+            spm/latim_pp/install invoked as an option in spm/install and
+            spm/remove cleans all modules.
+
+2008-09-26  genevent.c: added bottom value option: -f option ==> -t , -b
+
+2008-09-26  genevent.c: removed errors in waveform generator
+	
+2008-09-25  Adjusted log messages in scan_read_write.c
+
+2008-09-22  All error printk in spm/spm_dev/*.c changed to DOUBLE_LOG()
+	
+2008-09-22  DOUBLE_LOG macro in spm/include/spm_bac.h for diagnostics both to
+	    kern.log and current tty.
+	
+2008-09-22  Better diagnostic messages in spm/install and spm/spm_fc/install.
+
+2008-09-11  Parameter 'algorithm' added to spm_fc module parameters with name
+	    of user feedback routine.
+

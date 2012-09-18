@@ -1,0 +1,7 @@
+#!/bin/bash
+
+module=spm_dev
+
+[[ -d /sys/module/$module ]] && (/sbin/rmmod $module || exit -1)
+
+rm -f /dev/spm/*

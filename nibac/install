@@ -1,0 +1,43 @@
+#!/bin/bash
+
+#
+# install the spm_dev module on behalf of the owner of this file
+#
+
+who=`stat -c "%u" $0`
+whog=`stat -c "%u:%g" $0`
+module="nibac"
+param_addr="/sys/module/spm_dev/parameters"
+
+/sbin/insmod ./$module.ko $* || exit -1
+
+echo nibac $*
+
+rm -f /dev/spm/$module*
+mkdir -p /dev/spm
+   
+major=`cat /sys/module/$module/parameters/major`
+minor=`cat /sys/module/$module/parameters/board_minor`
+
+echo numbers are $major:$minor
+
+z=0
+for i in `echo $minor | tr "," " "`; do
+    [[ $i == 0 ]] || mknod /dev/spm/$module$z c $major $i
+    z=$((z+1))
+done
+
+is_master=`cat /sys/module/$module/parameters/board_rank | cut -d ',' -f 1`
+
+if [[ $is_master != 0 ]]; then
+    chmod 444 $param_addr/sample_adc
+    chmod 444 $param_addr/samples_per_point
+fi
+
+#
+# Configure the DAQ board(s) through the raw device(s)
+#
+
+./niconf -IetR || exit -1
+
+#echo 200050 > /sys/module/spm_dev/parameters/cadence_usec

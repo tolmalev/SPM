@@ -1,0 +1,18 @@
+#!/bin/bash
+
+module=nibac
+
+param_addr="/sys/module/spm_dev/parameters"
+
+if [[ -d /sys/module/$module ]]; then
+
+    is_master=`cat /sys/module/$module/parameters/board_rank | cut -d ',' -f 1`
+ 
+    /sbin/rmmod $module || exit -1
+    rm -f /dev/spm/$module*
+        
+    if [[ is_master != 0 ]]; then
+        chmod 644 $param_addr/sample_adc
+        chmod 644 $param_addr/samples_per_point
+    fi
+fi

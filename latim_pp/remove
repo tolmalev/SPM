@@ -1,0 +1,7 @@
+#!/bin/bash
+module="latim_pp"
+device="latim"
+
+[[ -d /sys/module/$module ]] && (/sbin/rmmod $module || exit -1)
+
+rm -f /dev/$device

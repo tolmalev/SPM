@@ -1,0 +1,35 @@
+#!/bin/bash
+
+#
+# install the spm_dev module on behalf of the owner of this file
+#
+
+who=`stat -c "%u" $0`
+whog=`stat -c "%u:%g" $0`
+module="spm_dev"
+
+/sbin/insmod ./$module.ko $* || exit -1
+
+chown $whog /sys/module/$module/parameters/*
+
+rm -f /dev/spm/*
+mkdir -p /dev/spm
+   
+#
+# create the function device scan
+#
+
+major=`cat /sys/module/$module/parameters/scan_major`
+minor=`cat /sys/module/$module/parameters/scan_minor`
+
+echo "major and minor for scan are: $major $minor"
+   
+mknod /dev/spm/scan c $major $minor
+
+mknod /dev/spm/info c $major $((minor + 1))
+   
+chown $whog /dev/spm/scan
+
+chmod 666 /dev/spm/scan
+
+echo Created devices: && ls -l /dev/spm/*

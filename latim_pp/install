@@ -1,0 +1,187 @@
+#!/bin/bash
+
+echo "
+ *
+ *    latim_pp - An Open Source module to measure the
+ *               interrupt latency time using the parallel port
+ *          
+ *
+ * Copyright (C) 2008 Marcello Carla' <carla@fi.infn.it>
+ *
+ * This program is free software; you can use, modify and redistribute
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation (www.fsf.org).
+ *"
+
+base=0378
+irq=7
+
+# decode options
+
+for i in $*; do
+    command=`echo $i | cut -d "=" -f 1`
+    argument=`echo $i | cut -d "=" -f 2`
+    case $command in
+	latim)
+	    ;;
+	dummy)
+	    dummy=1
+	    do_it="echo ---->"
+	    echo "A dummy installation will be tried:"
+	    echo "commands will only be printed, marked with ---->"
+	    ;;
+	base)
+	    base=$i
+	    ;;
+	irq)
+            irq=$i
+            ;;
+	help)
+	    echo "
+Options are:
+
+  dummy         Only try a dummy installation, without really executing the
+                commands
+  base=<int>    Specify the base registers address
+  irq=<int>     Specify the interrupt line to be used
+  major=<int>   }
+  minor=<int>   }
+  buffer_size   } see par 9.2 and 6.2 in the README file
+  high_water    }
+  read_bit      }
+  timeout       }
+  help          Show this text and exit"
+	    exit
+	    ;;
+	*)
+	    echo "Bad options - try ./install help"
+	    exit
+	    ;;
+    esac
+done
+
+base_in_use=`grep "^$base" /proc/ioports | tr -s " " | cut -d ' ' -f 3`
+
+cpus=`grep CPU /proc/interrupts | wc -w`
+
+irq_in_use=`cat /proc/interrupts | sed -es/^/" "/ | grep " $irq: "`
+irq_in_use=`echo $irq_in_use | tr -s " " | cut -d ' ' -f 4-`
+irq_in_use=`echo $irq_in_use | cut -d ' ' -f $cpus`
+
+if [[ ($base_in_use && ! `echo $base_in_use | grep parport`) || \
+    ($irq_in_use  && ! `echo $irq_in_use | grep parport`) ]]; then
+
+    echo -e "\nRequired resource(s) are in use to other driver(s):\n"
+    [[ $base_in_use == "" ]] || echo "base address:       $base_in_use"
+    [[ $irq_in_use == "" ]]  || echo "irq:                $irq_in_use"
+    echo -e "\nPlease, free resources and retry."
+    exit -1
+
+elif [[ `echo $base_in_use | grep parport` != "" ||
+	    `echo $irq_in_use | grep parport` != "" ]]; then
+
+    to_be_removed=""
+    for mod in lp ppdev parport_pc parport; do
+	[[ -d /sys/module/$mod ]] && to_be_removed="$to_be_removed $mod"
+    done
+
+    echo -e "\nRequired resource(s) are in use to the parport driver:\n"
+    [[ $base_in_use == "" ]] || echo "base address:       $base_in_use"
+    [[ $irq_in_use == "" ]]  || echo "irq:                $irq_in_use"
+    echo -e "\nI can free them unloading the modules:\n\n    $to_be_removed\n"
+    read -p "Is that o.k.? [y/n] "
+
+    if [[ $REPLY == "y" || $REPLY == "yes" || \
+	$REPLY == "Y" || $REPLY == "YES" ]]; then
+	for mod in $to_be_removed; do
+	    echo -n "Unloading $mod ..."
+	    $do_it /sbin/rmmod $mod || exit -1
+	    echo " ... done"
+	done
+    else
+	echo Your answer \"$REPLY\" does not authorize me to go on.
+	echo I stop here.
+	exit
+    fi
+fi
+
+#
+# identify the parallel port device
+#
+
+for paralleltype in PNP0400 PNP0401; do
+       pnpdevice=`grep -l $paralleltype /sys/devices/pnp*/*/id | sed -es/id//`
+       if [[ $pnpdevice ]]; then break; fi
+done
+
+if [[ $pnpdevice == "" ]]; then
+    echo "No Parallel Port found."
+    exit -1
+fi
+
+for i in 0 1; do
+    pp_state=`cat "$pnpdevice"resources | grep "state =" | cut -d ' ' -f 3`
+
+    [[ $i == "0" ]] && {
+	echo "Parallel port is PnP device: $pnpdevice" and is $pp_state
+    }
+
+    [[ $pp_state == "active" ]] && break    
+
+    [[ $i == 0 ]] || {
+	echo "Parallel Port activation failed."
+	exit -1
+    }
+
+    echo "Activating Parallel Port..."
+    if [[ $do_it ]]; then {
+	    $do_it echo activate ">" "$pnpdevice"resources
+	    break
+	} else {
+	    echo activate > "$pnpdevice"resources
+	}
+    fi
+done
+
+#
+# install the module
+#
+
+echo Installing the module ...
+
+who=`stat -c "%u" $0`
+whog=`stat -c "%u:%g" $0`
+
+module="latim_pp"
+device="latim"
+
+$do_it /sbin/insmod ./$module.ko $* || exit 1
+$do_it chown $whog /sys/module/$module/parameters/*
+
+#
+# get the dinamically allocated major and minor and create the device
+#
+
+echo Creating the latim device ...
+
+if [[ -a /sys/module/$module/major ]]; then
+    major=`cat /sys/module/$module/major`
+    minor=`cat /sys/module/$module/minor`
+elif [[ -a /sys/module/$module/parameters/major ]]; then
+    major=`cat /sys/module/$module/parameters/major`
+    minor=`cat /sys/module/$module/parameters/minor`
+else
+    if [[ $do_it ]]; then {
+	    major=_major_
+	    minor=_minor_
+	} else {
+	    echo "Cannot determine the major and minor"
+	    exit -1
+	}
+    fi
+fi
+
+$do_it mknod /dev/"$device" c $major $minor
+$do_it chown $whog /dev/$device
+
+$do_it echo All done and it seems good.

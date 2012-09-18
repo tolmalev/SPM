@@ -1,0 +1,27 @@
+/*
+ *    global #define's
+ */
+
+#define MINOR_COUNT 16
+#define MINIMAL_BUF 100
+
+/*
+ *    data structures
+ */
+
+struct scan_device {
+	struct cdev cdev;
+	dev_t  devnumber;
+};
+
+/*
+ *    function prototypes
+ */
+ 
+int scan_open       (struct inode *, struct file *);
+int scan_release    (struct inode *, struct file *);
+ssize_t scan_read   (struct file *, char __user *, size_t, loff_t *);
+ssize_t scan_write  (struct file *, const char __user *, size_t, loff_t *);
+
+struct event * spm_irq_handler (struct event *);
+void null_function (void);

@@ -1,0 +1,1198 @@
+
+	----------------------------------------------------
+	      spm2 - an open source Software Package with
+	       kernel Modules and sample applications for
+	      		Scanning Probe Microscopy
+	----------------------------------------------------
+	          Marcello Carla' <carla@fi.infn.it>
+	----------------------------------------------------
+                              25-Nov-2009
+	----------------------------------------------------
+
+=== Table of Contents
+
+	=== 1 Overview
+	=== 2 Supported Hardware
+	=== 3 Build
+	=== 4 Install
+	   --- 4.1 Install options
+
+	=== 5 Operation of the feedback loop
+	   --- 5.1 Add your own feedback algorithm
+
+	=== 6 The 'scan' device
+	   --- 6.1 Operation of the device
+	   --- 6.2 The scan parameters
+	   --- 6.3 Stopping a scan
+
+	=== 7 User space programs
+	   --- 7.1 frame
+	   --- 7.2 gamp
+	   --- 7.3 show
+	   --- 7.4 genevent
+
+	=== 8 The utility devices nibac and iobac
+	   --- 8.1 nibac and niconf
+	   --- 8.2 iobac and ioconf
+	   --- 8.3 mcbac
+           --- 8.4 nobac
+
+	=== 9 Measurement of interrupt response latency time
+	   --- 9.1 latim_pp
+	   --- 9.2 latim_pp options
+	   --- 9.3 latim
+
+	=== 10 Credits
+
+=== 1 Overview
+
+This package implements in kernel space a digital feedback loop for the
+control of a Scanning Probe Microscope apparatus. It can work with one or
+two DAQ boards of different models made by several manufacturers. The first
+DAQ board (the master) provides a clock in the form of a stream of interrupt
+requests at regular time intervals (default value is 200 usec), an analog
+input with typically eight ADC channels, an analog output, typically two DAC
+channels, and some digital output lines.
+Usually two DAC channels are not enough for a Scanning Probe Microscope, hence
+two or more DACs can be provided by a second board (the slave). In this
+implementation further resources from the slave board are not used (apart, if
+desired, some more digital output line).
+
+The spm code is arranged into several stacked kernel modules:
+
+	1) spm_dev: the core and base module, in charge of the 'scan'
+	   device, through which an user space application has access
+	   to the microscope operations.
+
+	2) one or two modules for specific hardware management, out of:
+
+   		nibac:	National Instruments Board Access Code
+		iobac:	IOtech Board Access Code
+		mcbac:	Measurement Computing Board Access Code
+
+	     for the control of several models of DAQ boards, or
+
+		nobac:  the no-board module for event simulation
+			(for debug and testing purposes)
+
+        3) spm_fc: the code that implements the feedback algorithm
+
+	In the package you should find the following:
+
+		spm_dev/	all required files to build and install
+				the 'spm_dev' core module.
+
+		nibac/
+		iobac/
+		mcbac/
+		nobac/		all required files to build and install
+				the 'nibac', 'iobac', 'mcbac' and 'nobac'
+				modules	and the user-space configuration
+				programs 'niconf' and 'ioconf'.
+
+		include/	include files that define data structures
+				common to kernel modules and application
+				programs, mainly the 'spm_dev_data.h' file
+				that contains the description of data
+				structures common to both user and kernel
+				space code.
+
+		feedback/	a directory that contains the files to
+				implement the feedback algorithms This is
+				the place where to add new files for new
+				algorithms (see par. 5.1).
+
+                spm_fc          a directory with support files for feedback
+                                algorithm compilation.
+
+		user/		a few user application programs, see par. 7.
+
+		latim_pp/	all required files to build and install a
+				parallel port driver to measure the latency
+				time in response to an interrupt request
+				(see par. 9).
+
+		parameters.def	default options for modules install.
+
+		Makefile
+		install
+		remove		script files, see par. 3 and 4
+
+The 'spm' package needs all the usual tools to build a kernel module
+and C application programs: make, gcc, and the like, and the source
+files for the target kernel properly installed and configured.
+
+Moreover, the application programs contained in the user/ directory
+require, properly installed:
+
+	gnuplot		version 4.0 or later
+	Tcl/Tk		version 8.3 or later
+
+=== 2 Supported Hardware
+
+	National Instruments  PCI-6221          id 1093:70af
+        	              PCI-6221 37-pin   id 1093:71bc
+
+	Measurement Computing DAS-6014          id 1307:0079
+
+	Iotech                DAQ-2001          id 1616:0409
+
+	(The Iotech DAQ-2001 board offers four DAC's, but cannot be
+	used as master because it has no interrupt circuitry).
+
+	Very likely many other boards of similar models can work
+	quite well; they are not in the list as it was not possible
+	to test them.
+
+=== 3 Build
+
+After downloading the spm-xxxxx.tgz package, place it in the preferred
+<work directory> and give, as user, the following commands:
+
+	cd <work directory>
+	tar -xzvf spm-xxxxxx.tgz
+	cd spm
+	make
+
+The command make should build recursively:
+
+	- the core module 'spm_dev'
+	- the driver for National Instruments boards (nibac)
+	- a user space program for N.I. boards setup (niconf)
+	- the driver for Iotech boards (iobac)
+	- a user space program for Iotech boards setup (ioconf)
+	- the driver for Measurement Computing boards (mcbac)
+	- the dummy no-board driver (nobac)
+	- a driver for the Parallel Port to measure the latency time to
+	  the interrupt requests (latim_pp)
+	- a user program to perform a sample frame scan (frame)
+	- a user program to mesaure latency times (latim)
+        - a user program to generate dummy events with the nobac driver
+          (genevent)
+        - all feedback algorithms, both given with the package and
+          added by user
+
+=== 4 Install
+
+Become root and give the following command:
+
+	./install
+
+The script file 'install' should do the following:
+
+	- scan the PCI devices list and identify the available supported
+	  DAQ boards
+	- install the 'spm_dev' module, create the /dev/spm directory and
+	  the 'scan' device
+	- assign the master and slave role to the DAQ boards previously found
+	- install the required nibac, iobac, mcbac, nobac modules
+	- populate /dev/spm with the utility devices nibac0, nibac1, iobac0 ...
+	  as required
+	- set up the DAQ boards in their respective role and start the game
+        - install and link to other modules the feedback code ('spm_fc'
+          module)
+
+This is the only step that requires root privileges. After that, revert to
+normal user and verify that everything is o.k.
+With the build procedure in par. 3, only a dummy feedback algorithm has
+been loaded, that will read values from ADCs and simply write them to DACs.
+However, this is enough to verify that the package is working correctly:
+
+	cd <work directory>/spm/user
+
+	./gamp &	a window should open showing the 'spm_dev' and
+			'spm_fc' module	parameters (see par. 6.2 for more
+			details)
+
+	./frame		a dummy frame scan should start and complete
+			with informative messages and (possibly) no error
+			condition
+
+Other informative messages (and possibly error conditions) are available with
+the 'dmesg' command.
+
+--- 4.1 Install options
+
+	Several options can be used with the install script; some of them
+	directly affect the install procedure, others are passed on to the
+	modules:
+
+		points=<int>
+			Number of points in each line of the frame, in the
+			range 1 ... whatever is reasonable.
+
+		lines=<int>
+			Number of lines in each frame. Range 0 ... 
+			The value 0 stands for an endless scan, like in an
+			old chart recorder.
+
+		cadence=<int>
+			The interval time between two consecutive measurements
+			performed by the ADC (in usec).
+			The interrupt rate (cadence * samples) must be in the
+			range 100 usec ... 2 sec; the ADC sampling rate
+			(cadence / adc) must be not less than 5 us.
+
+		samples=<int>
+			Each point in the line contains 'samples' measurements
+			performed by the ADC with the given cadence. The valid
+			range depends on the DAQ board characteristics,
+			typically samples*adc <= 2047. This option, with n>1,
+			can be used only DMA is available.
+
+		adc=<int>
+			Number of ADC channels to be converted at each
+			'cadence' time interval. Typically DAQ boards have
+			one ADC with an 1 ... 8 channels multiplexer.
+
+		dac=<int>
+			Size of the DAC area in the event buffer. It may be
+			specified smaller than the available number of DAC
+			channels and extra DAC channels will be left unused
+			or written with zeros. It may also be specified
+			greater than the available number of DAC channels and
+			data in excess used to pass extra information to user
+			space. Range: whatever is reasonable, in the range 0
+			to infinity.
+
+		feedback=<name>
+		ufc=<name>
+			Name of the user feedback algorithm, i.e.the name of
+			the (suitable) file put by the user into the 'spm/
+			feedback' directory. If the option is not specified,
+			the install procedure will try in the order:
+				feedback_code
+				template
+				simple
+			and will load the first found.
+                        All '.c' files that are in the 'feedback/' directory
+                        at build time are compiled into feedback algorithms
+			to be loaded at run time; the algorithms are named
+			after their source files, without the '.c' suffix;
+			in the original package there is a 'template.c' and
+                        a 'simple.c', but no 'feedback_code.c'; hence the
+                        user can write his own code with that name and it will
+                        become the default.
+
+                new
+			feedback code can be loaded, unloaded and reloaded
+                        after other modules have been installed; if a
+                        feedback module has already been loaded, you have
+                        to specify 'ufc=<name> new' to get the previous
+                        module unloaded and the new one installed; it is
+			safe from the point of view of the system to unload
+                        the feedback algorithm even during a scan, but likely
+                        this is a very crazy idea from the point of view of
+                        an SPM experiment.
+
+		dma=<0/1>
+			Use DMA to read data from the ADC, if possible.
+			Usually this option is always on and it is left to
+			the DAQ board driver the choice to use it, if possible.
+			This option *must* be on in order to use samples > 1.
+
+		shared=<yes/no/try>
+			By default, while registering the interrupt handler
+			for the master board, the driver will try to play
+			unfair and request exclusive use of the interrupt
+			line; this is not the common practice with a PCI
+			device, but it can really give an advantage in the
+			interrupt servicing time and in the last this is what
+			we really want from the computer when using this
+			software; if the request fails, it will be repeated
+			for a shared line; with the option "shared=yes", the
+			first request for an exclusive line will be skipped,
+			with "shared=no" the handler registration will fail
+			if exclusive use of the irq line cannot be obtained
+
+		swap=<0/1>
+			When the system has two identical DAQ boards, the
+			first detected is master, the second slave. With
+			swap=1 the order is reversed.
+
+		major=<int>
+			Statically specify the 'major' device number. For
+			diagnostics and debug only.
+
+		irq=<int>
+			Statically specify an irq line. Only for diagnostics
+			and problems with the interrupt subsystem.
+
+		dummy	try a dummy installation, writing the commands,
+                        without really executing them
+
+		ni,io,mc,no=<int,int>
+                        by default the install script looks for available
+                        boards and assigns the roles according to two
+                        preference rules:
+                        master board: 1) NI     2) MC     3) NO
+                        slave board:  1) IO     2) NI     3) MC
+                	With the ni,io,mc,no options it is possible to override
+                        default preferences, explicitly assigning the board
+                        roles. For example, "ni=2,1" means "use the second
+                        detected board as master, the first one as slave".
+                        The first given value says which board is to be used
+                        as master, the second value as slave. The boards are
+                        numbered: 1=first detected board, 2:second detected
+                        board etc.; the value 0 means "no board in this role".
+                        Hence, 'ni=2,0' means "use second N.I. board as
+                        master, do not use any of the N.I. boards as slave
+
+		latim   with this option the latim_pp module is installed;
+			this option must appear as the first parameter after
+			the ./install command; other latim_pp options may
+			follow (see par. 9.2) and none of the options above
+			is recognized, but dummy.
+
+	All these options have a built-in default. Alternative defaults can
+	be specified in the file 'spm/parameters.def' (read it for know-how);
+	values given with the 'install' command override both.
+
+=== 5 Operation of the feedback loop
+
+The 'spm' package implements in kernel space, in a module, a Digital Signal
+Processor (DSP), using a slice of the resources of the CPU, about from 5 to
+20%.
+
+As soon as the 'spm_dev' module and the driver(s) for the DAQ board(s) are
+up, a stream of interrupts is generated by the master board with a given
+cadence (default 200 usec). Each interrupt request comes at the end of one
+or more ADC conversion cycle, according to the value given to the "samples"
+option with the install command; in servicing the interrupt, the handler
+performs all the required housekeeping to correctly acknoweledge the
+interrupt, then reads the ADC values and executes a user-supplied function
+in charge of the feedback algorithm; at the end of the function, the
+'decisions' of the feedback algorithm are passed back to the handler in the
+form of a vector of values to be written to the DAC to control the probe
+movement(s). Then the handler exits.
+
+This is an endless loop, that stays always active until the module(s) are
+unloaded. It is in the nature of the Scanning Probe Microscopy: the
+distance between the probe and the sample has to be continuously controlled,
+even if no scan is actually performed.
+
+--- 5.1 Add your own feedback algorithm
+
+	The main purpose of the 'spm' package is to offer an environment
+	that allows you to implement your own digital feedback algorithm
+	in a simple way, writing only the relevant code in plain C.
+	All other aspects of the hardware and software management should
+	be care of the package.
+
+	These are the rules of the game:
+
+	- When the master board is recognized and configured, a specific
+	  interrupt handler is registered, nibac_irq_handler() or
+	  mcbac_irq_handler(), depending upon the board brand and model.
+	  This function is invoked after every interrupt generated by the
+	  master board and is in charge of handling all the interrupt
+	  bits and bytes with the hardware; (usually) you should not have
+	  to worry about it.
+
+	- When the nibac/mcbac_irq_handler() function is done with its
+	  bits and bytes, it executes the spm_irq_handler() function
+	  that lives in the 'spm_dev' module, passing it a structure that
+	  contains the data read from the ADC. The spm_irq_handler()
+	  function takes care of the frame scan process. All of this also
+	  should not worry the user.
+
+	- When everything is ready, spm_irq_handler() calls the user
+	  supplied function feedback_code(), passing it all relevant
+	  data; this function will perform all the computations the user
+	  desires for his feedback algorithms, thereafter it will return
+	  back to spm_irq_handler() and to the the hardware handler with
+          the data to be written to the DAC channels and, if the case,
+	  to some digital output lines.
+
+	  'feedback_code()' is the function that the user has to write and
+	  drop into a file into the feedback/ directory. All '*.c' files
+          found in that directory at build time will result into a feedback
+          algorithm that will be available to be loaded and used as a module
+          at run time (see par. 4.1). So, please, no stale .c file in
+          feedback/.
+
+	The feedback/ directory originally contains three files:
+	  
+		template.c
+	  		a template file with a detailed description of the
+	  		passed data structure and many other useful
+	  		informations;
+
+		simple.c
+	  		an inspiring example of a simple but effective
+                        feedback algorithm.
+
+		testchans.c
+                	a simple routine to test all available ADC and DAC
+                	channels: values from ADC's and to DAC's can be read
+                	and written in the 'gamp' window (see par. 7.2)
+
+=== 6 The 'scan' device
+
+The device '/dev/spm/scan' is the normal access from user space to the
+'spm_dev' module; it is created at install time with access permissions 0644
+and the same owner and group as the spm_dev/install script.
+
+An operation on the 'scan' device is started by a write, e.g.:
+
+	echo 's' > /dev/spm/scan
+
+followed by a sequence of read's, e.g.:
+
+	od -w52 -t x4 /dev/spm/scan 
+
+The 's' is the start command; it can be followed by parameters, see later.
+The command 'od ...' reads and displays in a raw way the (binary) data coming
+from the device in operation, 52 bytes a time. This corresponds to the
+built-in default of adc=8 dac=8 samples=1.
+
+Data are arranged as events, each event being a data block composed of a
+'struct event_head' data structure and two 'int16_t' data vectors of variable
+size, for DAC's and ADC's values respectively, closely packed.
+
+	struct event_head {
+        	struct irq_time {         /* interrupt service time */
+        	        int32_t nsec;
+                	int32_t sec;
+        	} irq_time;
+        	u_int8_t n_adc, n_dac;    /* number of ADC's and DAC's */
+        	u_int16_t samples;        /* ADC samples per point */
+        	u_int16_t adc_time;       /* ADC read time */
+        	u_int16_t service_time;   /* total sevice time */
+        	int8_t byte[2];           /* values to digital lines */
+        	u_int16_t r_adc;          /* actually read ADC values */
+	}
+	int16_t[n_dac]
+	int16_t[n_adc*samples]
+
+The event data block cannot be statically defined as a structure because
+the second and third fields are vectors of variable length. Macros are
+given (and described) in the include/spm_dev_data.h file to handle a vector
+of such data blocks as obtained from the 'scan' device.
+
+The actual size of the event data block, in bytes, is shown in the 'slot'
+variable among the 'spm_dev' parameters.
+
+--- 6.1 Operation of the device.
+
+	Only a single user at a time can open the device. A second open request
+	is blocked until the current user releases the device. If a request
+	is made O_NONBLOCK, it returns immediately with error condition -EBUSY.
+
+	Concurrent operation is not accepted by the device: when there is a
+	pending read/write operation, a second one is blocked until the first
+	one completes.
+
+	Actually, writing the 's' command only arms the device, but it is the
+	first read request that really triggers the start of the frame scan.
+	This is so because after an operation has been started, data are
+	produced at the rate of an event data block for every interrupt; with
+	default values, this happens every 200 usec, producing data at a rate
+	of 260000 bytes per sec.
+	Data are stored in a circular buffer and must be retrieved by the
+	user through one or more read request. If enough data are in the
+	circular buffer at the time the user issues the request, the request
+	is satisfied immediately; otherwise, the requesting process is put to
+	sleep until enough data have been collected and transferred into the
+	user buffer.
+
+	Apart the standard error conditions recognized by the operating
+	system while validating the call, other possible error conditions
+	from a read/write request are:
+
+	write:
+
+	-EINTR     a blocked request has been interrupted by a signal (Ctrl-C)
+	-EOMEM     memory allocation failed
+	-EFAULT    error while copying data from user space
+	-EBUSY     previous operation has not been correctly completed
+	-EINVAL    the request contained an invalid parameter
+
+	read:
+
+	-EINTR     a blocked request has been interrupted by a signal (Ctrl-C)
+	-EPERM     reading has been attempted but device was not armed
+	-EBUSY     the device is in an odd state and needs to be reset
+	-EFAULT    error while copying data to user space
+	-EIO       data buffer overrun
+	-ECANCELED running operation stopped before completion
+	-ETIME     the operation did not complete in due time
+
+
+--- 6.2 The scan parameters
+
+	The parameters that characterize a scan operation are all accessible
+	through the /sys filesystem, as pseudo-files in '/sys/module/spm_dev
+	/parameters'. Their ownership is set to the owner of the install file,
+	hence they can be modified by the user (the writable ones).
+
+	There is a Tcl/Tk script ('gamp') to access graphically the parameters
+	(see example in par. 4). When 'gamp' starts, a window should open,
+	containing one entry per parameter. Parameters that can be modified
+	have a grey background; read-only ones have an orange background.
+	When a parameter is modified, its background switches to yellow, until
+	the new value is really committed, either pressing 'Enter' or
+	executing the 'apply' command in the 'actions' menu.
+
+	The command written to the scan device can be a single character,
+	as already seen:
+
+		's'   arm a scan operation
+		'C'   clear any pending operation and reset the device
+                      (mainly useful to reset the 'scan' device after
+	              some operating anomaly)
+
+	and can be followed by a second optional character (e.g. a line
+        feed), that is ignored.
+
+	The 's' command can be also issued as a part of a structure containing
+        the same information you can pass through the 'gamp' window, together
+	with further user data.
+
+	Clearly, this is not intended to be used with the simple command
+
+		echo 's'  > /dev/spm/scan
+
+	as seen before (though not impossible); its purpose is to give a
+	user program a channel to pass the parameters for the scan it is
+	requiring. The sample program 'frame' uses this procedure to set
+	the scan characteristics.
+
+	The structure you can pass on is defined in 'include/spm_dev_data.h':
+
+		struct scan_params {
+			char code[2];
+			u16 mask;
+
+			u32 lines_per_frame;
+			u32 points_per_line;
+			u32 cadence_usec;
+			u32 buffer_size;
+			u32 buffer_size_min;
+			u32 high_water;
+			u32 timeout;
+        		u32 samples_per_point;
+        		u32 sample_adc;
+        		u32 sample_dac;
+                };
+
+        and can be followed by a raw binary area 
+
+		char pay_load[];
+
+        of whatever size, that will be made available to the feedback
+        code during the scan process.
+
+	The first byte of the structure (code[0]) is the 's' character;
+        it can be replaced by a ' ' (space character) to mean that you are
+        passing the scan parameters, but you do not want the scan be really
+        armed. A further single, repeatable, 's' will arm the scan operation.
+ 
+        The second byte of the structure is ignored.
+        
+	The fields that follow specify the values for the scan parameters.
+
+	Every field that is filled with valid data must be declared in
+	'mask' with the flags defined in the include file:
+
+	...->mask =
+	  LINES_PER_FRAME | POINTS_PER_LINE | .... | SAMPLE_DAC | PAY_LOAD;
+
+	Fields that are not declared in the mask are ignored, that is, they
+	retain their previous value, as shown in the 'gamp' window.
+
+	'lines_per_frame' and 'points_per_line' are self-explaining;
+		'lines_per_frame' can be set to zero. In this case the
+		line scan will go forever, until explicitly stopped
+		(see par. 6.3).
+
+	'cadence_usec' is the time interval between two successive ADC
+		conversions. If a value is given in this field, the master
+		board timer is set to this value before starting the new
+		scan. Valid values for 'cadence_usec' are in the range
+		100 usec <= cadence_usec * samples <= 1000000 usec, with
+		the further limit cadence_usec >= 40 usec; otherwise the
+		request is rejected with error code -EINVAL.
+
+	'buffer_size' is the size (in unit of 'event') of the circular
+		buffer used by the interrupt handler to save data; a
+		bigger buffer increases the probability of a failure in
+		memory allocation, but decrease the probabilty of a
+		data overrun if data are not retrieved in due time by
+		the user program.
+		The size of the buffer can be calculated roughly as
+
+			buffer_size = max_delay / cadence
+
+		where 'max_delay' is the maximum foreseeable delay that can
+		be expected between two data retrievals.
+
+		Example: max_delay = 2 sec, cadence = 200 usec
+
+			buffer_size = 2 / 200e-6 = 10000
+
+	'buffer_size_min': indeed, 'buffer_size' is only a hint for 'spm_dev';
+		a smaller buffer may be allocated if not enough memory is
+		available, but the smaller size is guaranteed to be not
+		smaller than 'buffer_size_min' or 2*points_per_line, whatever
+		is greater; otherwise the operation fails with the -ENOMEM
+		error code.
+
+	'high_water' specifies the filling level of the circular buffer
+		(as percent) at which data are transferred anyhow into the
+		user buffer, even if partially (default: 70%); however,
+		the read operation never returns with partial data only,
+		except in case of error or external stop.
+
+	'timeout' is the period of inactivity of the feedback loop after
+		which the module declares that something has gone wrong
+		and gives up. It is a severe condition of error usually due
+		to a hardware failure or bad configuration. 'timeout' is
+		expressed in msec.
+
+	'samples_per_point' specifies how many samplings the ADC has to
+		perform with the given cadence in a single event.
+		The event, hence the interrupt request, cadence is:
+			cadence * samples_per_point.
+		
+	'sample_adc' specifies how many ADC channels are to be used for the
+		conversion. Only channels 1 ... sample_adc are read and
+		saved into the event buffer.
+
+	'sample_dac' is the size of the DAC vector.
+
+	'pay_load' is a raw area, as large as you want, where data can be
+		stored; this data will be made available to the user feedback
+		algorithm during the execution of the scan process.
+
+	The way these parameters are made available in the feedback code
+        is described in more detail in the file spm/feedback/template.c.
+
+	Note: some of the parameters can be selected only if the DAQ board
+	driver supports the operation. A request that cannot be satisfied
+	is rejected with a -EINVAL return code.
+
+--- 6.3 Stopping a scan
+
+	Usually a frame is started and completes after 'lines_per_frame'
+	lines have been scanned, each line being composed of
+	'points_per_line' points; i.e., usually a frame contains
+	exactly 'points_per_line' * 'lines_per_frame' events.
+
+	Apart an error condition that may force a premature end of
+	a frame scan, a channel is provided through which a scan can
+	be cleanly stopped before its natural end. This is also the
+	natural way a scan is terminated after being started with
+	a zero value in 'lines_per_frame', which means "endless scan".
+
+	The stop request has two possible sources:
+
+		- the user feedback algorithm rises the flag
+
+			irq->request = Go_Idle;
+
+		  and returns (see feedback/template.c); the current event is
+		  completed, the user program is awakened with all completed
+		  events in its buffer and a -ECANCELED condition is issued on
+		  next data request.
+
+		- a stop code (65) is sent by the user to the 'spm_dev'
+		  module either writing it into the 'irq_stop_request'
+		  entry in the 'gamp' window, or directly into the /sys
+		  pseudo-filesystem:
+
+		  echo 65 > /sys/module/spm_dev/parameters/irq_stop_request 
+
+		  On the occurrence of next interrupt, the course of action
+		  will be exactly as in the first case.
+
+=== 7 User space programs
+
+A few user space utilities are included in the 'spm2' package to implement
+a few basic functionalities. You have already seen their usage in the
+descriptions above. Here is a more detailed description.
+
+--- 7.1 frame
+
+	'frame' is an user space process that starts a frame scan, collects
+	the data from the 'scan' device and stores and displays them.
+
+	Usage: spm/user/frame [OPTIONS]
+
+	Available options, as you can see with 'frame -h', are:
+
+		-a   <int> minimum buffer size (events)
+		-b   <int> buffer size (events)
+		-c   <int> cadence (usec)
+		-h   this help
+		-l   <int> lines per frame
+		-p   <int> points per line
+		-t   <int> timeout (msec)
+		-v   activate debug
+		-w   <int> high water level
+
+		-D   <string> command for distribution time analysis
+		-F   show the frame
+		-C   <int> ADC channel for image [0]
+		-R   rescale data according to calibration table
+		-L   <int> plot last n lines (0 ... 5) [3]
+		-S   save frame data to file
+
+	Options -abclptw define the value of a scan parameter that corresponds
+	to a field in the 'scan_params' structure; their meaning is explained
+	in par. 6.2.
+
+ 	Every scan parameter that is not specified through some option retains
+	its value as it appears in the 'gamp' window.
+
+	The values in the 'gamp' window can be changed at any time, but
+	they are taken into effect only on the occurrence of next start
+	command.
+
+	Upper case options direct on line data display and analysis:
+
+		-D " "	frame invokes the 'latim' utility to build and
+			analyze the distribution of the interrupt service
+			times; the string parameter with this option,
+			enclosed between quotation marks " ... ", is the
+			command line to 'latim' (see par. 9)
+
+		-F	on line display of the frame that is being acquired;
+			a file is built in the tmpfs file system, containing
+			a PNM image, and updated continuously as new data
+			become available; a Tcl/Tk utility (show) opens a
+			window and plots the image, refreshing it after every 
+			update; the path to the 'show' script is coded into
+			'frame' at build time; if you move the spm package
+			to another location, you have to rebuild it for this
+			feature to be usable.
+
+		-C <n>	when using the -F option, -C <n> allows you to select
+			the ADC channel to be used as data source for the
+			image to be plotted; default is ADC 0.
+
+		-L <n>	last <n> acquired lines are plotted in a xy graph,
+			using the 'gnuplot' program, that must be present
+			in the system, properly installed; the data channel
+			is selected through the -C option as in the case
+			of the frame display (-F); '-L 0' deactivates the
+			plot.
+
+		-S	all data obtained from the frame scan, that is exactly
+			'lines_per_frame * points_per_line' event structures,
+			are stored in a binary file; the file name is time
+			stamped as 'log-yyyymmddhhmmss.dat'.
+
+--- 7.2 gamp (Graphical Access to Module Parameters)
+
+	You have already encountered this Tcl/Tk script: it allows a graphical
+	access to a module parameters.
+
+	It is invoked as
+
+		spm/user/gamp
+        or
+                spm/user/gamp <module name> <module name> ...
+
+	A window will be opened with one entry for each parameter that is
+	declared by the module in '/sys/module/<module_name>/parameters/'.
+
+        By default 'gamp' opens two window, with access to the 'spm_dev'
+        and 'spm_fc' parameters, that control respectively the frame scan
+        process and the user feedback algorithm.
+
+	Parameters that can be modified have a grey background; read-only
+	ones have an orange background.
+
+	When a parameter is modified, its background switches to yellow,
+	until the new value is really committed, either pressing 'Enter'
+	or executing the 'apply' command in the 'actions' menu.
+
+	You must have write access to the parameters to be able to modify
+	them.
+
+	The values shown in 'gamp' window are refreshed with an interval
+	of 1 sec.
+
+--- 7.3 show
+
+	A Tcl/Tk script for a very very light viewer of PNM images.
+
+--- 7.4 genevent
+
+	This user space program builds pseudo-events that are delivered
+	from user space to the interrupt and feedback algorithms through
+	the 'nobac' module and device (par. 8.4).
+	Each delivered event contains a value in adc[0]	computed according
+	a selected pattern.
+
+	Usage: genevent [OPTION]
+
+ 		-c <int>   rate of event generation; this has nothing to do
+			   with the time written into the event structure,
+			   that  will be computed from the 'cadence_usec'
+			   parameter in 'spm_dev';
+ 		-t <int>   top value for the adc scale [20000];
+		-b <int>   bottom value for the adc scale [-20000];
+ 		-p <int>   repetition period for the data pattern [200];
+ 		-r <int>   reverse pattern after so many periods [0];
+ 		-s <...>   select the pattern type among: ramp, triangle,
+			   square, sin;
+		-f <...>   read adc data from user data file
+ 		-v         print some work statistics;
+ 		-h         this help;
+
+	Moreover, an empty function is provided that can be used to add
+	manipulation of the event packets for any test and diagnostic
+	requirements.
+
+=== 8 The utility devices and applications
+
+National Instruments and Iotech DAQ boards are handled by their own drivers
+'nibac' and 'iobac', but their configuration and set up is care of a user
+space program, respectively 'niconf' and 'ioconf'.
+
+--- 8.1 nibac and niconf
+
+	When the nibac module is loaded, the available supported boards
+	are recognized, taken over and registered; but they are not really
+	activated. In order to actually configure and activate the boards,
+	the nibac module implements the 'open',	'close'	and 'mmap' file
+	operations. For each one board, the 'install' script creates a
+	device in /dev/spm: nibac0 for a master board, nibac1 for a slave
+	one. Then, after the module is up, 'install' starts the user space
+	program 'niconf', that maps the board register regions into its
+	address space and performs all required operations for complete
+	configuration and activation.
+
+	The code for 'niconf' is deeply a rewrite in plain C of the examples
+	in nimhddk_linux26.zip and nimseries.zip by N.I.
+
+	A few more information are available with "spm/nibac/niconf -h",
+	but, Warning:
+		the use of 'niconf' can be dangerous for the system
+		integrity, specially after the board has been made
+		operative; for this reason, access to nibac devices
+		is allowed only to the root user.
+
+--- 8.2 iobac and ioconf
+
+	The same as in par. 8.1, for the Iotech DAQ boards.
+
+	The code for 'ioconf' has been adapted from the daqboard2000.c
+	driver in the comedi-0.7.76 package.
+
+--- 8.3 mcbac
+
+	All work for Measurement Computing boards is made by the 'mcbac'
+	module; neverthless, the 'mmap' file operation is available, if
+	you want (dangerously) twiddle with the board registers.
+
+--- 8.4 nobac
+
+	This module can be loaded instead of a true DAQ board driver and
+	its associated device (nobac0) used to generate dummy events.
+	Two different operating modes are possible:
+
+		- a user program (e.g. genevent, see par. 7.4) writes
+		  prepacked events to nobac;
+
+		- nobac can be instructed to generate events under true
+		  interrupt control and accurate timing (using the hrtimers).
+		  This function is started with:
+			echo s > /dev/spm/nobac0
+		  and stopped with
+			echo c > /dev/spm/nobac0
+
+		  Events will contain a faked reading for ADC 0, built
+		  according to a pattern selected among 'ramp', 'square'
+		  and 'triangle', with three adjustable fields:
+
+			pattern_period:	the pattern repetition period (in
+					events);
+			pattern_base:	starting value of the pattern at
+					beginning of the period;
+			pattern_step:	increment in ADC value after each
+					event.
+
+		  These fields are accessible as parameters of the nobac
+		  modules, hence through a 'gamp' window.
+
+=== 9 Measurement of interrupt response latency time
+
+Before using the 'spm' package for real work, you have to test if the time
+response of the system to a lasting stream of interrupt requests is fast
+enough.
+
+This analysis can be performed collecting the service times of a sequence
+of interrupts comparable with a typical application. Usually, we have used
+a stream of six million events, with a cadence of one event every 128 usec.
+
+You can get those time data directly from the 'spm_dev' module, if the
+system already has a DAQ board that can act as master board; if you only
+want to test the performance of some hardware configuration, with no DAQ
+board installed, you can can use the 'latim_pp' module and a Parallel Port,
+both the old legacy parallel port on the MotherBoard or a parallel port
+adapter to be plugged into the PCI bus.
+
+In any case, you can use the 'latim' user application, included in the
+package, to acquire and analyze the response time distribution.
+
+--- 9.1 latim_pp
+
+	True interrupt latency can be measured connecting a counter to the
+	parallel port; the counter increments at a stable and accurate rate
+	given by a clock and sends the computer an interrupt signal at some
+	predefined count values, thereafter goes on counting.
+	As soon as the interrupt service routine starts, it reads the counter
+	value, and this gives the interrupt servicing latency in units of the
+	counter clock period.
+
+	Alternatively, latency can be obtained measuring the time of occurrence
+	of a sequence of accurately spaced interrupt requests, as obtained
+	connecting an accurate external generator to the interrupt pin of the
+	parallel port; this alternative procedure can be used also programming
+	a DAQ board to generate such a sequence of events.
+
+	Only the external counter method can give the true distribution of
+	the latency times. The alternative approach will give the correct
+	distribution, but shifted along the time axis by an unknown constant
+	whose value has to be obtained by other means.
+
+	The 'latim_pp' module has been designed to handle both procedures;
+	it is built at the time the 'spm' package is built (see par. 3) and
+	can be installed with (as root):
+
+		cd <work directory>/spm/latim_pp
+		./install
+
+	The module should not be installed while the other modules of the
+	package are active; there is no problem about compatibility or
+	stability, but having both 'latim_pp' and 'spm_dev'+'xxbac' active
+	doubles the overhead on the system and may affect the responsiveness.
+	By converse, do not use 'latim_pp' while 'spm_dev' is working, unless
+	you are trying to stress your system.
+
+	When loaded, 'latim_pp' looks for a counter connected to the parallel
+	port. By the way, the port has to be configured as 'bidirectional' or
+	'EPP'. If an active counter is found, time measurements will be made
+	both with the external counter and the machine high resolution
+	internal clock; otherwise, the job will go on with the internal clock
+	alone. Anyway, a bit is always toggled, and can be read on a pin of
+	the parallel port, as soon as each interrupt request is serviced;
+	measuring with an oscilloscope the minimum delay between the interrupt
+	request and the response pulse the unknown constant is obtained.
+        The normal use of the toggle bit is to freeze the counter output
+        during the read operation.
+        Counter and PP bits are connected as follows:
+
+             PP      PP     counter          PP       PP     counter
+             pin    signal   signal          pin     signal   signal
+
+             1      strobe  enable           10         acq      irq
+             2        D0     out-0           11        busy   out-11
+             3        D1         1           12      perror   out-10
+             4        D2         2           13      select    out-9
+             5        D3         3           14      autofd   freeze
+             6        D4         4           15       fault    out-8
+             7        D5         5           16        init   freeze
+             8        D6         6           17    selectin   freeze
+             9        D7     out-7           18-25   ground   ground
+
+        The irq signal is an (unfreezed) duplication of counter out-9;
+        the bit of the 'freeze' signal can be selected at run time (see
+        par. 9.2), the polarity is automatically chosen if a counter is
+        really detected; the strobe-enable signal tells the counter that
+        the PP is in read mode.
+
+	The complete schematics of a suitable counter should be available
+        in spm.polosci.unifi.it together with more details about latency
+	time distribution measurements and some results.
+
+--- 9.2 latim_pp options
+
+	By default, 'latim_pp' looks for a parallel port with ioport 0x378
+	and irq 7; it is possible to specify different values for these two
+	parameters and some other variables that affect the module behaviour:
+
+		base:	the ioport address to be used instead of the default
+			0x378; this should work also for parallel port
+			boards to be plugged into a slot of the PCI bus;
+			the port address, typically in the range 0xe000 ...
+			0xffff, can be obtained with 'lspci -vvv -nn'
+
+		irq: 	the interrupt line to be used instead of default 7
+
+		buffer_size:
+		high_water:
+			the 'latim_pp' module uses a circular buffer as
+			described for the 'spm_dev' module and the 'scan'
+			device in par. 6; these	variables means the same
+			as described in par. 6.2
+
+		major:	if this parameter is specified at install time,
+			the module will try and use it or will fails;
+			otherwise, a major number will be requested
+			dynamically
+
+		minor:	the minor number assigned to the latim device
+			(currently, always 0)
+
+		read_bit:
+			the bit on the parallel port control register that
+			is toggled when the interrupt request is serviced
+			by the interrupt handler:
+
+			    read_bit	signal	       pin
+			    ------------------------------
+				2	autofd		14
+				3	init		16
+				4	selectin	17
+
+		timeout:
+			see par. 6.2
+
+	Example:
+			./install base=0x278 irq=5 read_bit=2
+
+--- 9.3 latim
+
+	The user application 'latim' obtains time data from the parallel
+	port through the 'latim_pp' module or from a DAQ board through the
+	'spm_dev' module and the 'frame' application.
+
+	The analysis that 'latim' can perform are:
+
+	 	- analyze the data stream and log anomalous time response
+		  values;
+	 	- build and plot a distribution of the intervals between
+		  consecutive interrupt requests;
+	 	- build and plot a distribution of the latency times as
+		  obtained from	a stream of regularly spaced interrupt
+		  requests;
+	 	- build and plot a distribution of the latency times as
+		  obtained reading an external counter;
+
+	Usage:
+
+		cd <work directory>/spm
+		user/latim [options]
+
+	There are available several options to specify data acquisition
+	and elaboration.
+
+		-a   	analyze the stream of events and log spurious values
+
+ 		-B   	insert a block separation between blocks into the
+			list file
+
+		-c <float> external clock period (usec) [def.: 0.25 usec]
+
+ 		-e	use the values read from the external counter
+
+                -E      xxxxxxxxxxxxxxx
+
+		-f <file> specify list and log file names; by default a log
+			fle and a list file (if requested with -L) are
+			generated with names ltm-yyyymmddhhmmss.log and
+			ltm-yyyymmddhhmmss.lst respectively
+ 
+ 		-g <int> when building time spectra, group together <int>
+			bins to a single one
+
+ 		-h	print this help and exit
+
+ 		-i	<string> input device [def.: /dev/latim]
+
+ 		-l	list all event data values
+
+ 		-L	save all event data values into a list file
+
+ 		-m <float> delay time threshold over which an event is
+			considered anomalous and logged (usec) [def.: 120]
+
+		-n <int> data acquisition is made in blocks of events; this
+			this option specifies how many events are to be
+			collected for each block
+
+		-N <int> how many blocks are to be collected
+
+ 		-p <int> a mask that specifies what time distributions are to
+			be plotted: jitter + latency + delay + clock march
+
+			1:jitter	distribution of the time intervals
+					between two successive events
+			2:latency	distribution of the true latency times
+					as obtained from the reading of an
+					external counter (see par. 9.1)
+			4:delay		distribution of the latency times
+					as obtained from a stream of regularly
+					spaced interrupt requests; should be
+					the same distribution as 'latency'
+					apart a shift on the time axis
+			8:clock march	plot of the differences between each
+					interrupt service time and the value
+					computed on the basis of a regular
+					clock march
+
+			default value is 15, i.e., everything
+
+ 		-s	report into the log file the time distributions
+			progressively accumulated after each data block
+
+ 		-S	report into the log file the global time
+			distributions accumulated
+
+ 		-t <int> expected time interval between two successive
+			interrupt requests (usec) [def.: 128]
+
+ 		-U	allocate from the very beginning an unique big buffer
+			for all data to be saved and write them to list file
+			to disk only after events acquisition has terminated
+
+ 		-v	activate verbose debug (more v's more debug)
+
+ 		-x <int> time range on the X axis for the time distributions
+			plot
+
+	A typical test of the performance of a PC as a DSP emulator for real
+	time applications is, when using an external counter to obtain the
+	true latency time distributions:
+
+		user/latim -a -n 20000 -t 128 -S -c 0.25 -e -L -N 300
+
+	otherwise, using the interrupt stream from a DAQ board:
+
+		user/frame -L 0 -p 2000 -l 0 -D "-a -n 20000 -S -L -N 300"
+
+	In the last example, the user program 'frame' is invoked for a
+	fictious frame 20000 points x 301 lines with cadence 128 usec;
+	the acquired events are all discarded, except the interrupt service
+	times that are passed through a pipe to 'latim', spawned by the -D
+	option; the string argument with -D are the instructions to 'latim';
+	you can see they are the same as in the previous example, except for
+	-e and -c that relate only to an external counter. 
+
+=== 10 Credits
+
+Credits are due to the following people for the development of the code
+described in this document:
+
+	Giovanni Aloisi <aloisi@unifi.it> for the feedback routine, the
+		design of the global layout and deep and extensive tests
+		with the microscope;
+
+	Federico Bacci <federico.bacci@gmail.com> for all the handling
+		of the Measurement Computing boards in 'mcbac' and the
+		design of the global layout;
+
+	Leonardo Lanzi <leonardo.lanzi@fi.infn.it> for the design of the
+		global layout and many suggestions with the kernel problems;
+
+	Anders Blomdell <anders.blomdell@control.lth.se> author of the comedi
+		driver daqboard2000.c, from which the code for the 'ioconf'
+		program was derived;
+
+	National Instruments <www.ni.com> for the examples in their
+		nimseries.zip and nimhddk_linux26.zip packages, from which
+		the code for the 'niconf' program was derived.

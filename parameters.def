@@ -1,0 +1,126 @@
+#
+#   Configuration file for the install procedure of the spm2 package.
+#
+#   The built-in value in the install procedure is shown
+#   for each parameter that can be specified in this file,
+#   together with the allowed range.
+#
+#   To introduce your own choice copy to a new line the commented
+#   example and modify the value.
+#
+
+#
+#   Number of points in each line of the frame.
+#   Range: 1 ... whatever your computer can handle.
+#
+# points=100
+
+points=201
+
+#
+#   Number of lines in each frame.
+#   Range: 0 ... whatever your computer can handle. The value 0 stands
+#   for an endless 'chart recorder' scan.
+#   
+# lines=20
+
+lines=100
+
+#
+#   The interval time between two consecutive measurements
+#   performed by the ADC (in usec).
+#   Range: the interrupt rate (cadence * samples) must be in
+#          the range 100 usec ... 2 sec; the adc sampling rate
+#          (cadence / adc) must be not less than 5 us.
+#
+# cadence=200
+
+#
+#   Each point in the line contain 'samples' measurements performed
+#   by the ADC with the given cadence.
+#   Range: depends on the DAQ board characteristics, typically
+#          samples*adc <= 2047
+#
+# samples=1
+
+#
+#   Number of ADC channels to be converted at each 'cadence' time interval.
+#   Range: typically DAQ boards have one ADC with 1 ... 8 channels multiplexer.
+#
+# adc=8
+
+#
+#   Size of the DAC area. It may be specified smaller than the available
+#   number of DAC channels and extra DAC channels will be left unused or
+#   written with zeroes. It may also be specified greater than the available
+#   number of DAC channels and data in excess used to pass extra
+#   information to user space.  
+#   Range: whatever is reasonable in the range 0 ... infinity.
+#
+# dac=8
+
+#
+#   Default calibration tables, to be used when actual calibration is
+#   not available. They are built according to the pro-forma factor of
+#   0.3125 uV / LSB.
+#   'adc_cal' is for the master board ADC, 'dac_cal_m' and 'dac_cal_s'
+#   are for the master and slave board DAC's respectively.
+#   The algorithm is a polynomial interpolation, values in the tables
+#   are the polynomial degree followed by the coefficients, constant
+#   term first.
+#
+# adc_cal="3 0 0.000320 0 0"
+# dac_cal_m="1 0 3125 0 0"
+# dac_cal_s="1 0 3125 0 0"
+
+#
+#   Name of the user feedback algorithm, i.e.the name of the (suitable)
+#   file put by the user into the spm/feedback directory. If the field
+#   is left empty, the install procedure will try in the order:
+#   'feedback_code', 'template' and 'simple'  and load the first found.
+#   Only template and simple are are in the spm2 packet.
+#
+# feedback=""
+
+feedback=template
+
+#
+#   Use DMA to read data from the ADC, if possible. Usually this option
+#   is always on and it is left to the DAQ board driver the choice to use
+#   it, if possible.
+#   It *must* be on in order to use samples > 1.
+#   Range: 0 1
+#
+# dma=1
+
+#
+#   By default, while registering the interrupt handler for the master
+#   board, the driver will try to play unfair and request exclusive use
+#   of the interrupt line; this is not the common practice with a PCI
+#   device, but it can really give an advantage in the interrupt servicing
+#   time and in the last this is what we really want from the computer when
+#   using this software; if the request fails, it will be repeated for a
+#   shared line; with the option "shared=yes", the first request for an
+#   exclusive line will be skipped, with "shared=no" the handler registration
+#   will fail if exclusive use of the irq line cannot be obtained
+#   Range: yes no try
+#
+# shared=""
+
+#
+#   When the system has two identical DAQ boards, the first detected is
+#   master, the second slave. With swap=1 the order is reversed.
+#
+# swap=0
+
+#
+#   Statically specify an irq line. Only for diagnostics and problems
+#   with the interrupt subsystem.
+#
+# irq=""
+
+#
+#   Statically specify the 'major' device number. For diagnostics and
+#   debug only.
+#
+# major=""

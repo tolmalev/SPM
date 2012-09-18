@@ -1,0 +1,17 @@
+#!/bin/bash
+
+#
+# install the iobac spm_fc on behalf of the owner of this file
+#
+
+who=`stat -c "%u" $0`
+whog=`stat -c "%u:%g" $0`
+module=spm_fc
+
+/sbin/insmod ./module/$1/$module.ko || {
+    echo "Failed while Installing module '$1'"
+    exit -1
+}
+
+[[ -d /sys/module/$module/parameters ]] && \
+    chown $whog /sys/module/$module/parameters/*

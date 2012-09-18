@@ -1,0 +1,45 @@
+#!/usr/bin/wishx
+
+#
+#	show a frame image
+#
+
+#  Copyright (C) 2008 Marcello Carla'
+
+#  This program is free software; you can use, modify and redistribute
+#  it under the terms of the GNU General Public License version 2 as
+#  published by the Free Software Foundation (www.fsf.org).
+
+
+#  Address of the author:
+#  Department of Physics, University of Florence
+#  Via G. Sansone 1
+#  Sesto F.no (Firenze) I 50019 - Italy
+#  e-mail: carla@fi.infn.it
+
+set image_file $argv
+
+frame .btn
+canvas .c -height 512 -width 512
+pack .btn -anchor w -fill x
+pack .c -expand 1 -fill both -anchor nw
+
+button .btn.update -text update -command update
+button .btn.exit -text exit -command clean_exit
+
+pack .btn.update .btn.exit -side left
+
+image create photo snap -file $image_file
+
+.c create image 0 0 -anchor nw -image snap
+
+proc update {} {
+    global image_file
+    snap read $image_file
+}
+
+proc clean_exit {} {
+    global image_file
+    file delete $image_file
+    exit
+}

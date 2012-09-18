@@ -1,0 +1,627 @@
+#!/bin/bash
+
+#
+# if this is a request for the latim_pp module,
+# do nothing and switch to latim_pp/install
+#
+
+[[ $1 == latim ]] && {
+    shift 1
+    (cd latim_pp && ./install $*) || {
+        echo "Load of latim_pp module failed."
+        exit -1
+    }
+    exit
+}
+
+echo "
+ *
+ *    spm - An Open Source package for digital feedback in
+ *          Scanning Probe Microscopy
+ *
+ * Copyright (C) 2008-2009 Marcello Carla' <carla@fi.infn.it>
+ *
+ * This program is free software; you can use, modify and redistribute
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation (www.fsf.org).
+ *"
+
+#
+# preset scan defaults
+#
+
+points=100
+lines=20
+samples=1
+cadence=200
+adc=8
+dac=8
+adc_cal="3 0 0.000320 0 0"
+dac_cal_m="1 0 3125 0 0"
+dac_cal_s="1 0 3125 0 0"
+feedback=""
+dma=1
+irq=""
+major=""
+shared=""
+swap=0
+dummy=0
+new_feedback=0
+
+# modify scan defaults according to "parameters.def"
+
+. ./parameters.def
+
+#
+# define supported boards and default values
+#
+
+ni=0; names[ni]=nibac
+io=1; names[io]=iobac
+mc=2; names[mc]=mcbac
+no=9; names[no]=nobac
+
+models[$ni]="1093:71bc 1093:70af"   # National Instruments
+models[$io]="1616:0409"             # Iotech
+models[$mc]="1307:0079"             # Measurement Computing
+
+models[$no]=""                      # no board (dummy board)
+
+types="$ni $io $mc $no"
+
+for i in $types ; do
+    ranks[$i]="none"
+    count[$i]=0
+    master[$i]="0"
+    slave[$i]="0"
+done
+
+cal_master="/tmp/spm.calibration.master"
+cal_slave="/tmp/spm.calibration.slave"
+cal_file="/tmp/spm.calibration"
+
+# decode options
+
+for i in $*; do
+    command=`echo $i | cut -d "=" -f 1`
+    argument=`echo $i | cut -d "=" -f 2`
+    case $command in
+	swap)
+	    swap=$argument
+	    ;;
+	dummy)
+            if [[ $argument != "0" ]]; then dummy=1; fi
+	    ;;
+	ni)
+	    ranks[$ni]=$argument
+	    ;;
+	io)
+	    ranks[$io]=$argument
+	    ;;
+	mc)
+	    ranks[$mc]=$argument
+	    ;;
+	no)
+	    ranks[$no]=$argument
+	    ;;
+	irq)
+            irq=$argument
+            ;;
+        major)
+            major=$argument
+            ;;
+        ufc)
+            feedback=$argument
+            ;;
+	feedback)
+            feedback=$argument
+            ;;
+        new)
+            new_feedback=1
+            ;;
+	shared)
+	    shared=$argument
+	    ;;
+        dma)
+            dma=$argument
+            ;;
+        cadence)
+	    cadence=$argument
+	    ;;
+	points)
+	    points=$argument
+	    ;;
+	lines)
+            lines=$argument
+	    ;;
+        samples)
+            samples=$argument
+            ;;
+        adc)
+            adc=$argument
+            ;;
+        dac)
+            dac=$argument
+            ;;
+	help)
+	    echo "
+Options are:
+
+  dummy=1       Only try a dummy installation, without really executing the
+                commands
+  ni=<m>[,<s>]  Override preference rules in assigning roles for National
+                Instruments boards -  m: board to be used as master
+                                      s: board to be used as slave
+  io=<m>[,<s>]      idem for Iotech boards
+  mc=<m>[,<s>]      idem for Measurement Computing boards
+  no=<m>[,<s>]      idem for the dummy board
+  swap=1/0      Swap/not swap the roles of identical master and slave boards.
+  irq=<int>     Specify the interrupt line to be used
+  major=<int>   Use a static major number
+  ufc=<name>    Load a user feedback code module ...
+  new             ... replacing an already loaded one
+  shared=no     Obtain an exclusive irq line or fail
+        =yes    Request a shared irq line
+        =try    Try an exclusive line first, then a shared one (default)
+  dma=1/0       Use/not use a DMA channel for master board ADC, if possible
+  cadence=<n>	sampling rate (usec) [note: interrupt rate = cadence * samples]
+  points=<n>	points per line
+  lines=<n>	lines per frame
+  samples=<n>   Oversampling factor when using a DMA channel
+  adc=<n>       Set conversion to n ADC for each sample
+  dac=<n>       Allocate for n DAC in each event
+  latim         Install latim_pp instead of spm modules
+  help          Show this text and exit"
+	    exit
+	    ;;
+	*)
+	    echo "Bad options - try ./install help"
+	    exit
+	    ;;
+    esac
+done
+
+#
+# perform some check on argument sanity
+#
+
+irq_cmd=""
+major_cmd=""
+shared_cmd=""
+do_it=""
+
+if [[ $irq != "" ]]; then irq_cmd="irq=$irq" ; fi
+if [[ $major != "" ]]; then major_cmd="major=$major" ; fi
+if [[ $shared != "" ]]; then shared_cmd="shared=$shared" ; fi
+if [[ $dummy == 1 ]]; then
+    do_it="echo ---->"
+    echo "A dummy installation will be tried:"
+    echo "commands will only be printed, marked with ---->"
+fi
+
+if [[ -d /sys/module/spm_dev && $dummy == 0 && $feedback == "" ]]; then
+
+    echo -e "\n   There is an 'spm_dev' module already installed,"
+    echo -e "     but its functionality cannot be determined.\n"
+    exit
+fi
+
+rate=$((cadence*samples))
+
+echo "Interrupt rate = $rate usec"
+
+if [ $rate -lt 100 ]; then
+
+    echo "Your interrupt rate is too fast."
+    echo "'samples * cadence' must not be less than 100 usec"
+    exit -1
+
+elif [ $rate -lt 200 ]; then
+
+    echo -e "\n  *****  WARNING  *****  WARNING  *****  WARNING  *****\n"
+    echo "Your interrupt rate (samples * cadence) is very fast and may cause"
+    echo "interrupt overrun. If the module freezes, unload and reload with a"
+    echo "slower rate."
+    
+fi
+
+#
+# the function definitions follow - main code at the end of the file
+#
+
+#
+# list available boards
+#
+
+list_boards() {
+    echo -n $1:
+    for i in $types ; do
+	echo -n "  ${names[i]}:${count[i]}"
+    done
+    echo
+}
+
+#
+# identify_boards()
+#
+# look for available supported DAQ boards
+#
+
+identify_boards() {
+
+    # locate lspci
+
+    if [[ -x /usr/bin/lspci ]]; then lspci="/usr/bin/lspci -n"
+    elif [[ -x /usr/sbin/lspci ]]; then lspci="/usr/sbin/lspci -n"
+    elif [[ -x /bin/lspci ]]; then lspci="/bin/lspci -n"
+    elif [[ -x /sbin/lspci ]]; then lspci="/sbin/lspci -n"
+    else 
+        echo -e "\nWARNING: 'lspci' not found - autoconfigure will fail"
+        lspci=echo
+    fi
+
+    # identify available boards
+
+    echo -e "\nBuilding board configuration:"
+    for i in $types ; do
+	echo "   Testing ${names[$i]}: ${models[$i]}"
+	if [[ $i == $no ]]; then
+	    (( count[$i]++ ))
+	else
+	    for b in `$lspci | cut -d ' ' -f 3`; do
+		for j in ${models[$i]}; do 
+		    [[ $b == $j ]] && (( count[$i]++ ));
+		done
+	    done
+	fi
+    done
+}
+
+#
+# select_one( "role" "elegible boards")
+#
+# select one board for a specific role
+#
+
+select_one() {
+
+    selected="none"
+    for i in $2 ; do
+	if [[ ${count[$i]} > 0 ]]; then
+            selected=$i
+            (( count[$i]-- ))
+            break
+	fi
+    done
+    if [[ $selected == "none" ]]; then
+	echo "No board found suitable to be $1"
+    else
+	echo "Board ${names[$selected]} can be $1"
+    fi
+}
+
+#
+# check options for a given configuration
+#
+
+check_given_configuration () {
+
+    r_master="none"
+    r_slave="none"
+    given=0
+
+    for i in $types ; do
+
+        altmaster[$i]=0
+        altslave[$i]=0
+	
+        [[ ${ranks[$i]} == "none" ]] || {
+
+            new=`echo ${ranks[$i]} | cut -d"," -f 1`
+            [[ $new == 0 ]] || {
+                [[ $r_master == "none" ]] || {
+                    echo "   Two boards requested as master!"
+                    exit -1
+                }
+                r_master=$i
+                altmaster[$i]=$new
+                given=1
+            }
+
+            new=`echo ${ranks[$i]},0 | cut -d"," -f 2`
+            [[ $new == 0 ]] || {
+                [[ $r_slave == "none" ]] || {
+                    echo "   Two boards requested as slave!"
+                    exit -1
+                }
+                r_slave=$i
+                altslave[$i]=$new
+                given=1
+            }
+
+            [[ ${altslave[$i]} == ${altmaster[$i]} ]] &&
+            [[ ${altmaster[$i]} != 0 ]] && {
+                echo -e "\nDouble request for '${names[$i]}' board.\n" 
+                exit -1
+            }
+        }
+    done
+}
+
+#
+# build board configuration
+#
+
+build_board_configuration () {
+
+    identify_boards
+    list_boards "Found"
+
+# who is master?
+#Preferences for master are    1: ni    2: mc    3: no
+
+    select_one "master" "$ni $mc $no"
+    f_master=$selected
+
+    list_boards "Left "
+
+# who is slave?
+#Preferences for slave are    1: io    2: ni    3: mc
+
+    select_one "slave" "$io $ni $mc"
+    f_slave=$selected
+
+# assign board ranks according to what has been found
+
+    [[ $f_master != "none" ]] && master[$f_master]=1
+    [[ $f_slave  != "none" ]] && slave[f_slave]=$((${master[$f_slave]}+1))
+
+# now look at options for a given board configuration
+
+    check_given_configuration
+
+    [[ $given == 1 ]] && echo \
+	"Given explicit assignment overrides default configuration"
+
+    echo -e "Suggested/Requested->Assigned board ranks:"
+
+# explicit assignement overrides the found one
+
+    for i in $types ; do
+	echo -n "   ${names[$i]}: ${master[$i]},${slave[$i]} / ${ranks[$i]}"
+	[[ $given == 0 ]] || {
+            master[$i]=${altmaster[$i]}
+            slave[$i]=${altslave[$i]}
+	}
+    	echo " -> ${master[$i]},${slave[$i]}"
+    done
+
+    if [[ $given == 0 ]]; then
+	masterboard=$f_master
+	slaveboard=$f_slave
+    else
+     	masterboard=$r_master
+	slaveboard=$r_slave
+    fi
+}
+
+#
+# install spm_dev
+#
+# install the spm module and create the scan device
+#
+
+install_spm_dev () {
+    echo -e "\nInstalling spm_dev ... "
+
+    ($do_it cd spm_dev && $do_it ./install $major_cmd \
+        cadence_usec=$cadence \
+	points_per_line=$points \
+        lines_per_frame=$lines \
+        samples_per_point=$samples \
+        sample_adc=$adc \
+        sample_dac=$dac) || {
+        echo "Load of core module 'spm_dev' for SPM failed."
+        exit -1
+    }
+}
+
+#
+# build default calibration files
+#
+
+build_cal_files () {
+
+    [[ $dummy == 1 ]] && cal_slave=/dev/null && cal_master=/dev/null
+
+    if [[ $slaveboard != "none" ]]; then
+	name=${names[$slaveboard]}
+	echo DAC $name $dac_cal_s > $cal_slave
+	echo DAC $name $dac_cal_s >> $cal_slave
+	[[ $slaveboard == $io ]] && \
+	    echo -e DAC $name $dac_cal_s >> $cal_slave &&
+	    echo -e DAC $name $dac_cal_s >> $cal_slave
+    fi
+
+    if [[ $masterboard != "none" ]]; then
+	name=${names[$masterboard]}
+
+	echo ADC $name $adc_cal > $cal_master
+	echo DAC $name $dac_cal_m >> $cal_master
+	echo DAC $name $dac_cal_m >> $cal_master
+    fi
+}
+
+#
+# install the slave module
+#
+
+install_slave () {
+
+    touch $cal_slave
+
+    if [[ $masterboard != $slaveboard && $slaveboard != "none" ]]; then
+        slaverank=${master[$slaveboard]},${slave[$slaveboard]}
+
+	name=${names[$slaveboard]}
+
+        echo "Installing $name with board_rank=$slaverank ..."
+
+        ($do_it cd $name && \
+            $do_it ./install board_rank=$slaverank) || {
+            echo -e "Attention: load and configure of slave board" \
+                "module failed!"
+            echo "Warning: forcing operations beyond this point" \
+                "may crash your system!"
+            exit -1
+        }
+    fi
+}
+
+#
+# install the master module
+#
+
+install_master () {
+
+    if [[ $masterboard == "none" ]]; then
+	echo -e "\nMaster board not found. The system will be incomplete."
+	exit
+    fi
+
+    if [[ $swap == 1 && $masterboard == $slaveboard ]]; then
+        masterank=${slave[$masterboard]},${master[$masterboard]}
+    else
+        masterank=${master[$masterboard]},${slave[$masterboard]}
+    fi
+
+    board_type=${names[$masterboard]}
+
+    if [[ $board_type == nibac ]]; then
+        dma="dma_use=$dma"
+    else
+        if [[ $dma == 1 ]]; then
+        	echo -e "\nUse of DMA not supported with \"$board_type\" board"
+        fi
+        dma=""
+    fi
+
+    echo "Installing ${names[$masterboard]} with board_rank=$masterank $irq_cmd"
+
+    ($do_it cd $board_type && \
+        $do_it ./install board_rank=$masterank $irq_cmd $shared_cmd $dma) || {
+        echo -e "\nLoad and configure of master board module failed."
+        echo "The system will be unusable."
+        exit -1
+    }
+}
+
+#
+# perform consistency check
+#
+
+consistency_check () {
+
+    if [[ $do_it == "" ]]; then
+        echo "Performing consistency check ..."
+    else
+        $do_it "Performing consistency check ..."
+        return
+    fi
+ 
+    for i in 0 1 2; do
+
+        [[ ${master[i]} == 0 ]] || [[ -c /dev/spm/${names[$i]}0 ]] || {
+            echo "Configuration failed for master board '${names[$i]}'."
+            echo  "The system will be unusable."
+            exit
+        }
+
+        [[ ${slave[i]} == 0 ]] || [[ -c /dev/spm/${names[$i]}1 ]] || {
+            echo "Configuration failed for slave board '${names[$i]}'."
+	    echo  "The system will be unusable."
+            exit
+        }
+    done
+
+    if [[ $slaveboard == "none" ]]; then
+        echo "No slave board. The system may be incomplete."
+    else
+        echo "   ... board module(s) have been loaded."
+    fi
+}
+
+#
+# select and load a feedback code module
+#
+
+load_feedback_code () {
+
+# if no ufc has been given, pick a default
+
+    if [[ $feedback == "" ]]; then
+	for i in feedback_code template simple; do
+	    [[ -d spm_fc/module/$i ]] && {
+		feedback=$i
+		echo "Selected default feedback code '$i'"
+		break
+	    }
+	done
+    fi
+
+    if [[ $feedback == "" ]]; then
+
+	echo "No feedback code will be loaded"
+
+    else
+
+	[[ $feedback == "none" || -f spm_fc/module/$feedback/spm_fc.ko ]] || {
+	    echo
+	    echo "Feedback module '$feedback' not found"
+	    echo
+	    return -1
+	}
+
+	if [[ -d /sys/module/spm_fc ]]; then
+	    if [[ $new_feedback == 1 ]]; then
+		echo "Removing feedback code ..."
+		($do_it cd spm_fc && $do_it ./remove)
+	    else
+		echo
+		echo "A feedback module is already installed."
+		echo "If I have to replace it, add the option 'new'"
+		echo
+		exit -1
+	    fi
+	fi
+
+	if [[ $feedback == "none" ]]; then
+	    echo "No feedback code will be loaded"
+	else
+	    echo -e "\nInstalling feedback code '$feedback'"
+	    ($do_it cd spm_fc && $do_it ./install $feedback)
+	fi
+    fi
+}
+
+#
+# main code
+#
+
+if [[ ! -d /sys/module/spm_dev || $dummy == 1 ]]; then
+
+    $do_it rm -f /tmp/spm.calibration $cal_master $cal_slave
+
+    build_board_configuration
+    install_spm_dev
+    build_cal_files
+    install_slave
+    install_master
+    consistency_check
+
+    $do_it cp $cal_master $cal_file
+    $do_it dd if=$cal_slave of=$cal_file oflag=append conv=notrunc
+
+fi
+
+load_feedback_code && echo  -e "\n    Have a good scan!\n"

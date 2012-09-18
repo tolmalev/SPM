@@ -1,0 +1,12 @@
+#!/bin/bash
+
+nobac/remove
+iobac/remove
+mcbac/remove
+nibac/remove
+spm_fc/remove
+spm_dev/remove
+
+latim_pp/remove
+
+rm -f /tmp/spm.calibration*
